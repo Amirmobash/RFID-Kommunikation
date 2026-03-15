@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+Setup-Datei für die pi-rc522 Bibliothek.
+Autor: Amir Mobasheraghdam
+Datum: 2025
+"""
+
 import os
 import sys
 from setuptools import setup, find_packages
@@ -8,6 +14,9 @@ from setuptools.command.test import test as TestCommand
 
 
 def get_version():
+    """
+    Liest die Versionsnummer aus der Datei pirc522/version.py aus.
+    """
     with open('pirc522/version.py', 'r') as version_file:
         for line in version_file:
             if line.startswith('__version__'):
@@ -16,6 +25,9 @@ def get_version():
 
 
 class PyTest(TestCommand):
+    """
+    Benutzerdefinierter Befehl zum Ausführen der Tests mit pytest.
+    """
     def finalize_options(self):
         TestCommand.finalize_options(self)
         self.test_args = []
