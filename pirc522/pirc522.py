@@ -2,13 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-RFID RC522 Bibliothek für Raspberry Pi (Deutsche Version)
-Autor: AmirMobasheraghdam
-Datum: 2025
+RFID RC522 Bibliothek für Raspberry Pi
+Autor: Amir Mobasheraghdam
+Version: 2.0 (Verbesserte Version)
 
 Diese Klasse ermöglicht die Kommunikation mit dem RFID-Modul RC522 über SPI.
-Sie enthält Methoden zum Initialisieren, Erkennen von Karten, Lesen der UID,
+Enthält Methoden zum Initialisieren, Erkennen von Karten, Lesen der UID,
 Authentifizieren sowie Lesen und Schreiben von Datenblöcken.
+
+English:
+This class enables communication with the RC522 RFID module via SPI.
+It provides methods for initialization, card detection, UID reading,
+authentication, and reading/writing data blocks.
 """
 
 import spidev
@@ -16,11 +21,9 @@ import RPi.GPIO as GPIO
 import time
 
 class RFID:
-    """
-    Hauptklasse für die RFID RC522 Kommunikation
-    """
-    
-    # Register-Adressen (aus dem Datenblatt)
+    """Hauptklasse für die RFID RC522 Kommunikation / Main class for RFID RC522 communication."""
+
+    # Register addresses (from MFRC522 datasheet)
     COMMAND_REG      = 0x01
     COM_IEN_REG      = 0x02
     DIV_IEN_REG      = 0x03
@@ -52,7 +55,7 @@ class RFID:
     RF_CFG_REG       = 0x26
     VERSION_REG      = 0x37
 
-    # Befehle für das Modul
+    # Commands for the module
     IDLE_CMD         = 0x00
     CALC_CRC_CMD     = 0x03
     TRANSMIT_CMD     = 0x04
@@ -62,299 +65,340 @@ class RFID:
     AUTHENT_CMD      = 0x0E
     SOFT_RESET_CMD   = 0x0F
 
+    # Mifare commands
+    REQ_IDLE         = 0x26
+    REQ_ALL          = 0x52
+    ANTICOLL_CMD     = 0x93
+    ANTICOLL_CL1     = 0x20
+    SELECT_CMD       = 0x93
+    SELECT_CL1       = 0x70
+    READ_BLOCK_CMD   = 0x30
+    WRITE_BLOCK_CMD  = 0xA0
+    HALT_CMD         = 0x50
+
     def __init__(self, bus=0, device=0, speed=1000000, pin_rst=25, pin_ce=0):
         """
-        Initialisiert den RFID-Reader
+        Initialisiert den RFID-Reader / Initializes the RFID reader.
 
         Args:
-            bus (int): SPI Bus Nummer (standard: 0)
-            device (int): SPI Device Nummer (standard: 0)
-            speed (int): SPI Geschwindigkeit in Hz (standard: 1000000)
-            pin_rst (int): GPIO Pin für Reset (standard: 25)
-            pin_ce (int): GPIO Pin für Chip Enable (standard: 0 = CE0)
+            bus (int): SPI Bus number (default: 0)
+            device (int): SPI device number (default: 0)
+            speed (int): SPI speed in Hz (default: 1000000)
+            pin_rst (int): GPIO pin for reset (default: 25)
+            pin_ce (int): GPIO pin for chip enable (default: 0 = CE0)
         """
         self.bus = bus
         self.device = device
         self.speed = speed
         self.pin_rst = pin_rst
         self.pin_ce = pin_ce
-        
-        # SPI initialisieren
+
+        # Initialize SPI
         self.spi = spidev.SpiDev()
         self._init_spi()
-        
-        # GPIO initialisieren
+
+        # Initialize GPIO
         self._init_gpio()
-        
-        # RFID-Reader initialisieren
+
+        # Initialize RFID reader
         self._init_reader()
-    
+
     def _init_spi(self):
-        """Initialisiert die SPI-Schnittstelle"""
+        """Initialisiert die SPI-Schnittstelle / Initializes SPI interface."""
         try:
             self.spi.open(self.bus, self.device)
             self.spi.max_speed_hz = self.speed
             self.spi.mode = 0
         except Exception as e:
-            raise RuntimeError(f"SPI Initialisierung fehlgeschlagen: {e}")
-    
+            raise RuntimeError(f"SPI initialization failed: {e}")
+
     def _init_gpio(self):
-        """Initialisiert die GPIO-Pins"""
+        """Initialisiert die GPIO-Pins / Initializes GPIO pins."""
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.pin_rst, GPIO.OUT)
         GPIO.output(self.pin_rst, 1)
-    
+
     def _init_reader(self):
-        """Initialisiert den RFID-Reader"""
+        """Initialisiert den RFID-Reader / Initializes the RFID reader."""
         self.reset()
         self._write_register(self.TX_AUTO_REG, 0x40)
-        self._write_register(self.MODE_REG, 0x3D)
+        self._write_register(self.MODE_REG, 0x3D)   # CRC enabled
         self._write_register(self.TX_CONTROL_REG, 0x03)
         self.antenna_on()
-    
+
     def reset(self):
-        """Setzt den RFID-Reader zurück (Soft-Reset)"""
+        """Führt einen Soft-Reset durch / Performs a soft reset."""
         self._write_register(self.COMMAND_REG, self.SOFT_RESET_CMD)
-        time.sleep(0.1)
-        # Warten bis Reset abgeschlossen
+        time.sleep(0.05)
+        # Wait for reset to complete
         while self._read_register(self.COMMAND_REG) & (1 << 4):
             pass
-    
+
     def antenna_on(self):
-        """Aktiviert die Antenne"""
+        """Aktiviert die Antenne / Enables the antenna."""
         value = self._read_register(self.TX_CONTROL_REG)
         if ~(value & 0x03):
             self._write_register(self.TX_CONTROL_REG, value | 0x03)
-    
+
     def antenna_off(self):
-        """Deaktiviert die Antenne"""
+        """Deaktiviert die Antenne / Disables the antenna."""
         value = self._read_register(self.TX_CONTROL_REG)
         self._write_register(self.TX_CONTROL_REG, value & ~0x03)
-    
+
     def _write_register(self, address, value):
-        """Schreibt in ein Register des RC522"""
+        """Schreibt in ein Register / Writes to a register."""
         address = (address << 1) & 0x7E
         self.spi.xfer2([address, value])
-    
+
     def _read_register(self, address):
-        """Liest aus einem Register des RC522"""
+        """Liest ein Register / Reads a register."""
         address = ((address << 1) & 0x7E) | 0x80
         response = self.spi.xfer2([address, 0])
         return response[1]
-    
+
     def _set_bitmask(self, address, mask):
-        """Setzt bestimmte Bits in einem Register (ODER-Maske)"""
+        """Setzt bestimmte Bits / Sets certain bits."""
         value = self._read_register(address)
         self._write_register(address, value | mask)
-    
+
     def _clear_bitmask(self, address, mask):
-        """Löscht bestimmte Bits in einem Register (UND-NOT-Maske)"""
+        """Löscht bestimmte Bits / Clears certain bits."""
         value = self._read_register(address)
         self._write_register(address, value & (~mask))
-    
-    def _communicate(self, command, send_data, bits=8):
+
+    def _flush_fifo(self):
+        """Leert den FIFO-Puffer / Flushes the FIFO buffer."""
+        self._write_register(self.FIFO_LEVEL_REG, 0x80)
+
+    def _communicate(self, command, send_data, bits=8, rx_wait=True):
         """
-        Führt einen Befehl aus und sendet/empfängt Daten über SPI
-        
+        Führt einen Befehl aus und sendet/empfängt Daten / Executes a command and sends/receives data.
+
         Args:
-            command (int): Befehlscode (z.B. TRANSCEIVE_CMD)
-            send_data (list): Zu sendende Bytes
-            bits (int): Anzahl der Bits pro Byte (meist 8)
-        
+            command (int): Command code (e.g., TRANSCEIVE_CMD)
+            send_data (list): Bytes to send
+            bits (int): Bits per byte (usually 8)
+            rx_wait (bool): Wait for receive (for transceive commands)
+
         Returns:
-            tuple: (error_code, received_data)
+            tuple: (error, received_data)
         """
-        # FIFO leeren
-        self._clear_bitmask(self.FIFO_LEVEL_REG, 0x80)
-        # Daten in FIFO schreiben
+        # Flush FIFO before starting
+        self._flush_fifo()
+
+        # Write data to FIFO
         for byte in send_data:
             self._write_register(self.FIFO_DATA_REG, byte)
-        
-        # Befehl ausführen
+
+        # Execute command
         self._write_register(self.COMMAND_REG, command)
         if command == self.TRANSCEIVE_CMD:
-            self._set_bitmask(self.BIT_FRAMING_REG, 0x80)  # StartSend aktivieren
-        
-        # Warten bis Befehl abgeschlossen
-        max_wait = 1000  # Timeout ~100ms
+            self._set_bitmask(self.BIT_FRAMING_REG, 0x80)  # StartSend
+
+        # Wait for completion
+        timeout = 1000  # ~100ms
         while True:
-            n = self._read_register(self.COM_IRQ_REG)
-            if n & 0x30:  # TimerIRQ oder RxIRQ?
+            irq = self._read_register(self.COM_IRQ_REG)
+            if irq & 0x30:  # TimerIRQ or RxIRQ
                 break
-            max_wait -= 1
-            if max_wait == 0:
+            timeout -= 1
+            if timeout == 0:
                 break
-            time.sleep(0.001)
-        
-        self._clear_bitmask(self.BIT_FRAMING_REG, 0x80)  # StartSend deaktivieren
-        
-        # Fehler auslesen
+            time.sleep(0.0001)
+
+        # Clear interrupt flags
+        self._write_register(self.COM_IRQ_REG, 0x30)
+
+        # Deactivate StartSend
+        if command == self.TRANSCEIVE_CMD:
+            self._clear_bitmask(self.BIT_FRAMING_REG, 0x80)
+
+        # Check for errors
         error = self._read_register(self.ERROR_REG)
         if error & 0x13:  # BufferOvfl, ParityErr, ProtocolErr
             return (error, None)
-        
-        # Daten aus FIFO lesen
+
+        # Read received data (if any)
         received = []
-        while self._read_register(self.FIFO_LEVEL_REG) > 0:
-            received.append(self._read_register(self.FIFO_DATA_REG))
-        
-        return (error, received)
-    
-    def request(self, req_mode=0x26):
+        if rx_wait:
+            while self._read_register(self.FIFO_LEVEL_REG) > 0:
+                received.append(self._read_register(self.FIFO_DATA_REG))
+
+        return (0, received)
+
+    def request(self, req_mode=REQ_IDLE):
         """
-        Sendet eine Anfrage (Request) an eine Karte in der Nähe.
-        
+        Sendet eine Anfrage an eine Karte / Sends a request to a card.
+
         Args:
-            req_mode (int): Anfragemodus (0x26 = Standard Request, 0x52 = All Request)
-        
+            req_mode (int): 0x26 = REQ_IDLE, 0x52 = REQ_ALL
+
         Returns:
-            tuple: (error, tag_type) – tag_type ist 2 Bytes (z.B. 0x0400 für MIFARE)
+            tuple: (error, tag_type) – tag_type is 2 bytes (e.g., 0x0400 for MIFARE)
         """
-        self._write_register(self.BIT_FRAMING_REG, 0x07)  # 7 Bits pro Byte senden
+        self._write_register(self.BIT_FRAMING_REG, 0x07)  # 7 bits per byte
         send_data = [req_mode]
         error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
-        if error or not received:
-            return (error, None)
-        if len(received) != 2:
-            return (-1, None)
+        self._write_register(self.BIT_FRAMING_REG, 0x00)  # Back to 8 bits
+
+        if error or not received or len(received) != 2:
+            return (error or -1, None)
         tag_type = (received[0] << 8) | received[1]
         return (0, tag_type)
-    
-    def anticoll(self):
+
+    def anticoll(self, cascade_level=1):
         """
-        Führt die Anti-Kollision durch und liefert die UID der Karte.
-        
+        Führt die Anti-Kollision durch und gibt die UID zurück / Performs anticollision and returns UID.
+
+        Args:
+            cascade_level (int): 1 for first cascade, 2 for second, etc.
+
         Returns:
-            tuple: (error, uid) – uid ist eine Liste von 4 Bytes (bei MIFARE Classic)
+            tuple: (error, uid_list) – uid_list is a list of bytes
         """
-        self._write_register(self.BIT_FRAMING_REG, 0x00)  # 8 Bits pro Byte
-        send_data = [0x93, 0x20]  # Anti-Collision Befehl (CL1)
-        error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
-        if error or not received:
-            return (error, None)
-        if len(received) != 5:  # 4 Bytes UID + 1 Byte Prüfsumme (BCC)
+        # For cascade level 1 (standard 4-byte UID)
+        if cascade_level == 1:
+            self._write_register(self.BIT_FRAMING_REG, 0x00)  # 8 bits
+            send_data = [self.ANTICOLL_CMD, self.ANTICOLL_CL1]
+            error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
+            if error or not received or len(received) != 5:
+                return (error or -1, None)
+            # Verify BCC
+            bcc = 0
+            for i in range(4):
+                bcc ^= received[i]
+            if bcc != received[4]:
+                return (-2, None)
+            return (0, received[:4])
+        else:
+            # For 7-byte UID (cascade level 2) – simplified; see full library for complete implementation
+            # This version only supports 4-byte UID (MIFARE Classic)
             return (-1, None)
-        # Prüfsumme berechnen und prüfen
-        bcc = 0
-        for i in range(4):
-            bcc ^= received[i]
-        if bcc != received[4]:
-            return (-2, None)  # Prüfsummenfehler
-        return (0, received[:4])
-    
+
     def select_tag(self, uid):
         """
-        Wählt eine Karte anhand ihrer UID aus.
-        
+        Wählt eine Karte anhand ihrer UID aus / Selects a card by its UID.
+
         Args:
-            uid (list): 4 Bytes UID
-        
+            uid (list): UID bytes (4 bytes for MIFARE Classic)
+
         Returns:
-            bool: True wenn erfolgreich, sonst False
+            bool: True if successful, False otherwise
         """
-        send_data = [0x93, 0x70] + uid
-        # CRC berechnen (vereinfacht: wir hängen 0x00,0x00 an, der Reader berechnet automatisch)
+        send_data = [self.SELECT_CMD, self.SELECT_CL1] + uid
+        # The CRC will be calculated automatically, but we need to send two dummy bytes for the CRC.
+        # The _communicate method handles the FIFO, so just send the data and let the hardware append CRC.
+        # However, the RC522 expects the command to be sent with the CRC appended. We'll send the data
+        # and the CRC will be added automatically if enabled. To simplify, we append zeros and the hardware
+        # will overwrite them with the correct CRC.
         send_data.extend([0, 0])
         error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
         if error or not received:
             return False
-        # Erfolg wenn received[0] & 0x10 gesetzt (SAK)
-        if received[0] & 0x10:
-            return True
-        return False
-    
-    def stop_crypto(self):
-        """Beendet die aktuelle Verschlüsselung"""
-        self._clear_bitmask(self.STATUS2_REG, 0x08)
-    
+        # If successful, the first byte (SAK) should have bit 3 set (0x10)
+        return (received[0] & 0x10) != 0
+
     def authenticate(self, block, key, key_type='A', uid=None):
         """
-        Authentifiziert sich für einen bestimmten Block.
-        
+        Authentifiziert sich für einen bestimmten Block / Authenticates for a specific block.
+
         Args:
-            block (int): Blocknummer
-            key (list): 6 Bytes Schlüssel
-            key_type (str): 'A' oder 'B'
-            uid (list): 4 Bytes UID (muss bei MIFARE Classic übergeben werden)
-        
+            block (int): Block number (0-63 for 1K)
+            key (list): 6 bytes key
+            key_type (str): 'A' or 'B'
+            uid (list): 4 bytes UID (must be provided for MIFARE Classic)
+
         Returns:
-            bool: True wenn Authentifizierung erfolgreich
+            bool: True if successful
         """
         if uid is None or len(uid) != 4:
             return False
-        
-        # Authentifizierungsbefehl vorbereiten
+
+        # Prepare authentication command
         mode = 0x60 if key_type.upper() == 'A' else 0x61
         send_data = [mode, block] + key + uid[:4]
-        
-        error, received = self._communicate(self.AUTHENT_CMD, send_data)
-        if error or not received:
-            return False
-        # Erfolg wenn kein Fehler und Bit 0x08 in STATUS2_REG gesetzt (Crypto1 aktiv)
+
+        # Write authentication command and data to FIFO
+        self._flush_fifo()
+        for byte in send_data:
+            self._write_register(self.FIFO_DATA_REG, byte)
+
+        # Start authentication
+        self._write_register(self.COMMAND_REG, self.AUTHENT_CMD)
+
+        # Wait for completion
+        timeout = 1000  # ~100ms
+        while True:
+            cmd = self._read_register(self.COMMAND_REG)
+            if cmd & 0x0F == self.IDLE_CMD:  # Idle
+                break
+            timeout -= 1
+            if timeout == 0:
+                break
+            time.sleep(0.0001)
+
+        # Check Crypto1On bit in Status2Reg
         status2 = self._read_register(self.STATUS2_REG)
         if status2 & 0x08:
             return True
         return False
-    
+
+    def stop_crypto(self):
+        """Beendet die aktuelle Verschlüsselung / Stops encryption."""
+        self._clear_bitmask(self.STATUS2_REG, 0x08)
+
     def read_block(self, block):
         """
-        Liest einen 16-Byte-Block aus dem aktuell authentifizierten Sektor.
-        
+        Liest einen 16-Byte-Block / Reads a 16-byte block.
+
         Args:
-            block (int): Blocknummer (0-63 bei 1K)
-        
+            block (int): Block number (0-63 for 1K)
+
         Returns:
-            list: 16 Bytes oder None bei Fehler
+            list: 16 bytes or None if error
         """
-        send_data = [0x30, block]
-        # CRC anhängen
-        send_data.extend([0, 0])
+        send_data = [self.READ_BLOCK_CMD, block, 0, 0]  # Two dummy bytes for CRC
         error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
         if error or not received:
             return None
         if len(received) == 16:
             return received
         return None
-    
+
     def write_block(self, block, data):
         """
-        Schreibt 16 Bytes in einen Block.
-        
+        Schreibt 16 Bytes in einen Block / Writes 16 bytes to a block.
+
         Args:
-            block (int): Blocknummer
-            data (list): 16 Bytes Daten
-        
+            block (int): Block number
+            data (list): 16 bytes data
+
         Returns:
-            bool: True bei Erfolg
+            bool: True if successful
         """
         if len(data) != 16:
             return False
-        
-        send_data = [0xA0, block] + data
-        # CRC anhängen (wird automatisch berechnet)
-        send_data.extend([0, 0])
+        send_data = [self.WRITE_BLOCK_CMD, block] + data + [0, 0]  # dummy CRC
         error, received = self._communicate(self.TRANSCEIVE_CMD, send_data)
         if error or not received:
             return False
-        # Erfolg wenn received[0] == 0x0A
-        if len(received) > 0 and received[0] == 0x0A:
-            return True
-        return False
-    
+        # Success response is 0x0A (ACK)
+        return received[0] == 0x0A
+
     def halt(self):
-        """Versetzt die Karte in den HALT-Zustand"""
-        send_data = [0x50, 0x00, 0x00, 0x00]  # Halt Befehl + CRC (00 00)
-        self._communicate(self.TRANSCEIVE_CMD, send_data)
-    
+        """Versetzt die Karte in den HALT-Zustand / Puts the card into HALT state."""
+        send_data = [self.HALT_CMD, 0x00, 0x00, 0x00]  # Dummy CRC
+        self._communicate(self.TRANSCEIVE_CMD, send_data, rx_wait=False)
+
     def wait_for_tag(self, timeout=None):
         """
-        Wartet auf eine RFID-Karte und gibt deren UID zurück.
-        
+        Wartet auf eine RFID-Karte und gibt deren UID zurück / Waits for an RFID card and returns its UID.
+
         Args:
-            timeout (float): Maximale Wartezeit in Sekunden (None = unendlich)
-        
+            timeout (float): Max wait time in seconds (None = infinite)
+
         Returns:
-            list: UID als Liste von 4 Bytes oder None bei Timeout/Fehler
+            list: UID as list of bytes, or None if timeout/error
         """
         start = time.time()
         while True:
@@ -366,14 +410,15 @@ class RFID:
             if timeout and (time.time() - start) > timeout:
                 return None
             time.sleep(0.05)
-    
+
     def cleanup(self):
-        """Räumt GPIO auf und schließt SPI"""
+        """Räumt GPIO auf und schließt SPI / Cleans up GPIO and closes SPI."""
         self.antenna_off()
         GPIO.cleanup()
         self.spi.close()
 
-# Beispiel zur Verwendung (wenn direkt ausgeführt)
+
+# Beispiel zur Verwendung / Example usage
 if __name__ == "__main__":
     rfid = RFID()
     print("RFID Reader initialisiert. Warte auf Karte...")
@@ -382,21 +427,18 @@ if __name__ == "__main__":
             uid = rfid.wait_for_tag(timeout=1.0)
             if uid:
                 print(f"Karte erkannt! UID: {uid}")
-                # UID hexadezimal ausgeben
                 uid_hex = ''.join(f'{b:02X}' for b in uid)
                 print(f"UID (hex): {uid_hex}")
-                
-                # Karte auswählen (optional)
+
                 if rfid.select_tag(uid):
                     print("Karte ausgewählt.")
                 else:
                     print("Auswahl fehlgeschlagen.")
-                    
-                # Authentifizierung für Block 4 (Sektor 1, Block 0)
-                key = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]  # Standard-Transponderschlüssel
+
+                # Authentifizierung mit Standard-Schlüssel
+                key = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]  # Default key
                 if rfid.authenticate(4, key, 'A', uid):
                     print("Authentifizierung erfolgreich.")
-                    # Block 4 lesen
                     data = rfid.read_block(4)
                     if data:
                         print(f"Gelesene Daten: {data}")
